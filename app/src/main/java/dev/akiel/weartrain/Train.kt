@@ -91,32 +91,26 @@ fun collectNotes(list: List<Itinerary>) = list.flatMap { it.legs }.flatMap { it.
 
 fun recommendedIndex(list: List<Itinerary>) = list.indexOfFirst { !it.cancelled && deviation(it) == null }.coerceAtLeast(0)
 
-fun assess(list: List<Itinerary>, notes: List<String>): Assessment {
+// What's wrong with this one trip as it runs, ignoring which route it takes.
+fun trouble(it: Itinerary): Assessment? = when {
+    it.cancelled -> Assessment(State.BAD, "Disrupted", "Cancelled")
+    it.delayMin >= BAD_DELAY_MIN -> Assessment(State.BAD, "Disrupted", "+${it.delayMin} min")
+    it.delayMin >= WARN_DELAY_MIN -> Assessment(State.WARN, "Wobbly", "+${it.delayMin} min")
+    collectNotes(listOf(it)).isNotEmpty() -> Assessment(State.WARN, "Wobbly", "Service message posted")
+    else -> null
+}
+
+// Graded on the recommended trip alone: trouble on a slower alternative isn't
+// trouble on the commute.
+fun assess(list: List<Itinerary>): Assessment {
     if (list.isEmpty()) return Assessment(State.BAD, "No route", "The planner cannot get you there at all right now.")
-    // The planner returns slower multi-leg options alongside good ones; one clean
-    // direct run means the commute isn't broken.
     val best = list[recommendedIndex(list)]
     val dev = deviation(best)
-    val worst = maxOf(0, list.maxOf { it.delayMin })
-    val cancelled = list.count { it.cancelled }
-
+    if (best.cancelled) return trouble(best)!!
     if (dev != null) return Assessment(State.BAD, "Route changed", dev.replaceFirstChar { it.uppercase() } + ".")
-    if (cancelled >= 2 || worst >= BAD_DELAY_MIN) {
-        val bits = listOfNotNull(
-            if (cancelled > 0) "$cancelled of ${list.size} cancelled" else null,
-            if (worst > 0) "up to +$worst min" else null,
-        )
-        return Assessment(State.BAD, "Disrupted", bits.joinToString(" · "))
-    }
-    if (cancelled == 1 || worst >= WARN_DELAY_MIN || notes.isNotEmpty()) {
-        val bits = listOfNotNull(
-            if (cancelled > 0) "1 option cancelled" else null,
-            if (worst >= WARN_DELAY_MIN) "up to +$worst min" else null,
-        ).ifEmpty { listOf("Service message posted") }
-        return Assessment(State.WARN, "Wobbly", bits.joinToString(" · "))
-    }
+    trouble(best)?.let { return it }
     val via = best.transitLegs.firstOrNull()?.line ?: "train"
-    return Assessment(State.OK, "Running", "Direct $via, ${best.durationMin} min${if (worst > 0) ", +$worst min" else ""}")
+    return Assessment(State.OK, "Running", "Direct $via, ${best.durationMin} min${if (best.delayMin > 0) ", +${best.delayMin} min" else ""}")
 }
 
 private val hhmm = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
@@ -240,14 +234,13 @@ fun stillToCome(list: List<Itinerary>, now: Instant) = list.filter { it.goneAt?.
 data class Slot(val from: Instant, val until: Instant, val it: Itinerary, val assessment: Assessment, val since: Instant)
 
 fun upcoming(list: List<Itinerary>, now: Instant): List<Slot> {
-    val notes = collectNotes(list)
     val slots = mutableListOf<Slot>()
     var from = now
     var left = stillToCome(list, now)
     while (left.isNotEmpty()) {
         val next = left[recommendedIndex(left)]
         val until = next.goneAt!!
-        slots += Slot(from, until, next, assess(left, notes), slots.lastOrNull()?.it?.start ?: from)
+        slots += Slot(from, until, next, assess(left), slots.lastOrNull()?.it?.start ?: from)
         from = until
         left = stillToCome(left, until)
     }

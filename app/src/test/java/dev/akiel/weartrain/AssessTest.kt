@@ -14,19 +14,25 @@ class AssessTest {
     fun cleanDirectRunWinsOverSlowerChange() {
         val list = listOf(change, direct)
         assertEquals(1, recommendedIndex(list))
-        assertEquals(State.OK, assess(list, emptyList()).state)
+        assertEquals(State.OK, assess(list).state)
         assertEquals("S3 + S5 · 1 change", shapeOf(change))
     }
 
     @Test
     fun grading() {
-        assertEquals("Route changed", assess(listOf(change), emptyList()).verdict)
+        assertEquals("Route changed", assess(listOf(change)).verdict)
         assertEquals("S5 covering this run instead of S3", deviation(trip(leg("S5", Stop("A", null)))))
         assertEquals("skipping B", deviation(trip(leg("S3", Stop("A", null), Stop("B", null, cancelled = true)))))
-        assertEquals(State.WARN, assess(listOf(direct.copy(delayMin = 4)), emptyList()).state)
-        assertEquals(State.WARN, assess(listOf(direct), listOf("works")).state)
-        assertEquals("Disrupted", assess(listOf(direct.copy(delayMin = 12)), emptyList()).verdict)
-        assertEquals("No route", assess(emptyList(), emptyList()).verdict)
+        assertEquals(State.WARN, assess(listOf(direct.copy(delayMin = 4))).state)
+        val noted = direct.copy(legs = direct.legs.map { it.copy(alerts = listOf("works")) })
+        assertEquals(State.WARN, assess(listOf(noted)).state)
+        // Trouble on a non-recommended option doesn't grade the commute.
+        assertEquals(State.OK, assess(listOf(direct, direct.copy(delayMin = 12), noted.copy(legs = change.legs))).state)
+        assertEquals("Disrupted", assess(listOf(direct.copy(delayMin = 12))).verdict)
+        assertEquals("No route", assess(emptyList()).verdict)
+        assertEquals(null, trouble(direct))
+        assertEquals(State.WARN, trouble(direct.copy(delayMin = 4))?.state)
+        assertEquals(State.BAD, trouble(direct.copy(delayMin = 12))?.state)
     }
 
     @Test

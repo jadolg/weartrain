@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
                 val list = withContext(Dispatchers.IO) { plan(dir) }
                 val notes = collectNotes(list)
                 if (dir == Direction.forNow()) refreshGlance()
-                Board(list, notes, assess(list, notes), "Live · " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")), now)
+                Board(list, notes, assess(list), "Live · " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")), now)
             } catch (e: FeedException) {
                 prev.copy(assessment = Assessment(State.UNKNOWN, e.verdict, e.message ?: ""), updated = "Last attempt failed", fetchedAt = now)
             }
@@ -167,7 +167,7 @@ fun BoardPage(dir: Direction, board: Board?, refresh: () -> Unit, open: (Int) ->
     }
     val all = board?.list.orEmpty()
     val list = stillToCome(all, now)
-    val a = if (board == null || board.assessment?.state == State.UNKNOWN || list.isEmpty()) board?.assessment else assess(list, board.notes)
+    val a = if (board == null || board.assessment?.state == State.UNKNOWN || list.isEmpty()) board?.assessment else assess(list)
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth()) {
             item { Eyebrow(dir.title) }
@@ -211,23 +211,21 @@ fun Eyebrow(text: String, tag: String? = null) {
 
 @Composable
 fun Departure(it: Itinerary, recommended: Boolean, onClick: () -> Unit) {
+    val t = trouble(it)
     val badge = when {
         it.cancelled -> "cancelled"
         it.delayMin > 0 -> "+${it.delayMin}′"
         it.delayMin < 0 -> "${it.delayMin}′"
+        t != null -> "⚠ notice"
         else -> "on time"
     }
-    val badgeColor = when {
-        it.cancelled || it.delayMin >= BAD_DELAY_MIN -> Bad
-        it.delayMin > 0 -> Warn
-        it.delayMin < 0 -> Ok
-        else -> MaterialTheme.colorScheme.onSurface
-    }
+    val badgeColor = t?.state?.color() ?: if (it.delayMin < 0) Ok else MaterialTheme.colorScheme.onSurface
+    val border = t?.state?.color() ?: Ok.takeIf { recommended }
     Card(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (recommended) Modifier.border(2.dp, Ok, CardDefaults.shape) else Modifier),
+            .then(if (border != null) Modifier.border(2.dp, border, CardDefaults.shape) else Modifier),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(fmt(it.start), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -250,7 +248,7 @@ fun Route(it: Itinerary, notes: List<String>) {
     val blob = notes.joinToString(" ").lowercase().replace(Regex("\\s+"), "")
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth()) {
-            item { Eyebrow("${fmt(it.start)} route", deviation(it)) }
+            item { Eyebrow("${fmt(it.start)} route", deviation(it) ?: trouble(it)?.let { t -> "${t.verdict}, ${t.sub}" }) }
             it.legs.forEach { leg -> item { LegView(leg, blob) } }
         }
     }
